@@ -1,0 +1,108 @@
+import streamlit as st
+from google import genai
+from google.genai import types
+
+# Configuración de la página
+st.set_page_config(
+    page_title="Simulador de Contrainterrogatorio - Litigación",
+    page_icon="⚖️",
+    layout="wide"
+)
+
+st.title("⚖️ Simulador Táctico de Testigos Hostiles")
+st.markdown("Entrená tus técnicas de contraexamen simulando perfiles de testigos basados en declaraciones reales.")
+
+# Barra lateral para configuración
+with st.sidebar:
+    st.header("1. Configuración de la Sesión")
+    
+    # Campo para la API Key de Google Gemini (puedes usar Google AI Studio gratis)
+    api_key = st.text_input("Gemini API Key", type="password", help="Ingresá tu clave de API de Google AI Studio.")
+    
+    st.markdown("---")
+    st.header("2. Perfil del Testigo")
+    perfil_testigo = st.selectbox(
+        "Seleccioná el arquetipo / perfil:",
+        [
+            "Hostil, calculada y defensiva (Tipo Karin)",
+            "Técnica, fría y evasiva",
+            "Arrogante y sobradora",
+            "Insegura y contradictoria"
+        ]
+    )
+    
+    st.markdown("---")
+    st.header("3. Contexto o Declaración Previa")
+    declaracion_base = st.text_area(
+        "Pegá aquí la declaración previa o los puntos clave:",
+        placeholder="Ej: Declaró en fiscalía que vio a 6 personas en mayo/junio de 2024...",
+        height=150
+    )
+    
+    if st.button("Reiniciar Simulacro", type="primary"):
+        st.session_state.messages = []
+        st.rerun()
+
+# Validar API Key
+if not api_key:
+    st.warning("⚠️ Por favor, ingresá tu clave de API de Google en la barra lateral para iniciar el simulador.")
+    st.info("Podés obtener una clave gratuita en [Google AI Studio](https://aistudio.google.com/).")
+    st.stop()
+
+# Inicializar cliente de Google GenAI
+client = genai.Client(api_key=api_key)
+
+# Inicializar historial de chat en la sesión
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Construir el prompt del sistema (System Instructions) según el perfil
+system_instruction = f"""
+Sos un testigo en un juicio laboral/penal siendo sometido a un contrainterrogorio por un abogado defensor.
+Tu perfil psicológico y actitud en el estrado es: {perfil_testigo}.
+Contexto y contradicciones de tu declaración previa que debés defender o disimular:
+{declaracion_base}
+
+REGLAS DE COMPORTAMIENTO:
+- Respondé en primera persona, tal como lo haría un testigo real en un estrado judicial (con las emociones, pausas, defensas o resistencia propias del perfil elegido).
+- No seas demasiado obvio ni te quiebres de inmediato; hacé que el abogado deba trabajar el contraexamen con precisión, controlando los tiempos y usando las contradicciones de forma táctica.
+- Mantené el realismo de una audiencia judicial real.
+"""
+
+# Mostrar el historial de chat en pantalla
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Capturar la pregunta del usuario (el letrado)
+if prompt := st.chat_input("Realizá tu pregunta al testigo..."):
+    # Agregar la pregunta del usuario al historial
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Preparar el historial para enviarlo a la API de Gemini (usando gpt-4o / gemini-2.5-flash)
+    # Convertimos el historial de Streamlit al formato que pide la nueva SDK de google-genai
+    contents = []
+    for m in st.session_state.messages:
+        role = "user" if m["role"] == "user" else "model"
+        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
+
+    with st.chat_message("assistant"):
+        with st.spinner("El testigo está respondiendo..."):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.7,
+                    )
+                )
+                assistant_reply = response.text
+                st.markdown(assistant_reply)
+                
+                # Guardar la respuesta del modelo en el historial
+                st.session_state.messages.append({"role": "assistant", "content": assistant_reply})
+            except Exception as e:
+                st.error(f"Ocurrió un error al conectar con la API: {e}")
